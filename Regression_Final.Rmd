@@ -1,0 +1,176 @@
+---
+title: "Blood Pressure vs Personal Information"
+author: "Sean Kearns"
+date: "12/15/2021"
+output: pdf_document
+fontsize: 14
+header-includes:
+    - \usepackage{setspace}\doublespacing
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Introduction 
+In the modern day USA, high blood pressure and other heart conditions remain a prevalent issue in the health of our nation. From a 2017-18 study presented by the CDC, levels of hypertension (overly high blood pressure) were returning to levels not seen since the late 90's [1]. The American diet contains many fatty foods that are often frozen first and typically quite low quality. From a 2010 study from the National Cancer Institute, it was found that "nearly the entire U.S. population consumes a diet that is not on par with recommendations" [2]. This could mean things such as not eating enough vegetables, eating too many fats, or getting too many calories from carbohydrates. Because of this trend and the fact that fast food and other so called "junk" food offer a cheap and quick option for hungry stomachs, this paper will aim to investigate whether there are other factors that contribute or work to limit high blood pressure. The data set that is being used throughout the duration of the paper is from the 2013-14 National Health and Nutrition Examination Survey. The data was cleansed to fit the linear model presented in this paper. Any modifications to the data are explained in detail below. The data set is public and put into a usable csv file on kaggle, and can be found [here](https://www.kaggle.com/cdc/national-health-and-nutrition-examination-survey?select=questionnaire.csv).  
+
+# Data 
+This data set is quite large and because it is a survey, it contains many null values. There are multiple individual data sets included within the entirety of the survey data, but we will choose to focus on the Demographics, the Questionnaire, and the physical Examination results for this model. The results from each section of the survey are separated in different tables, but a common field called 'SEQN' was used to link the tables, one unique identifier to use across all tables. For each regressor we chose, we aimed to consider what question or data point would be most beneficial in determining the true value of that regressor. For example, because we wanted to consider the consumption of marijuana in any form as a potential factor on blood pressure, we chose to examine the question of "How many times have you consumed Marijuana in the last 30 days?". A similar process was preformed for each of the other regressors as well. We begin our investigation by consider the following factors: age, health insurance, physical activity, income, diet behavior, consumer behavior, marijuana, alcohol, sex frequency, depression, and food security. Most of these data points were survey responses which may make interpretation difficult, but by changing the format of some of the factors, some insights can be drawn. 
+
+```{r, include = FALSE}
+question_data <- read.csv("/cloud/project/questionnaire.csv")
+demo_data <- read.csv("/cloud/project/demographic.csv")
+exam_data <- read.csv("/cloud/project/examination.csv")
+```
+To begin, the 'dplyr' package was used so that the data frames in the data could be manipulated to only hold necessary information. The first regressor that was changed was depression. This variable was formed by adding up the survey responses of 10 questions dealing with depression. Each question asked about bad thoughts and how often they occurred. Because any bad thought at any time is an indicator of depression, it wouldn't be correct to only consider one question. Thus, the depression score was instead created to better indicate the depression levels of the respondent. If a respondent didn't answer any of the questions, they were not screened for depression. Thus, any null values were replaced with 0's. 
+```{r, include = FALSE}
+library("dplyr")
+head(exam_data)
+sort(question_data$SXQ610, decreasing = TRUE)
+# add the column that is a sum of the depression questions 
+question_data <- mutate(question_data, SUMDPQ = DPQ010+ DPQ020+ DPQ030+ DPQ040+ DPQ050+ DPQ060+ DPQ070+ DPQ080+ DPQ090+ DPQ100)
+#make a table of only the data points in question 
+needed_question_data <- select(question_data, c(SEQN, SXQ610, HIQ210, PAD675, IND235, DBD895, CBD070, DUQ230, ALQ160, FSD061, SUMDPQ))
+#convert NAs in survey response to 0, if there was no response, left as na 
+needed_question_data$SUMDPQ[is.na(needed_question_data$SUMDPQ)] <- 0
+needed_question_data$PAD675[is.na(needed_question_data$PAD675)] <- 0
+needed_question_data$DUQ230[is.na(needed_question_data$DUQ230)] <- 0
+needed_question_data$ALQ160[is.na(needed_question_data$ALQ160)] <- 0
+needed_question_data$FSD061[is.na(needed_question_data$FSD061)] <- 1
+needed_question_data$SXQ610[is.na(needed_question_data$SXQ610)] <- 0
+needed_question_data$HIQ210[is.na(needed_question_data$HIQ210)] <- 1
+sort(needed_question_data$SUMDPQ, decreasing = TRUE)
+
+head(needed_question_data)
+```
+Next, we manipulate our Blood Pressure variable. This data point came from the physical examination portion of the data set. It is common practice for three readings to be taken when taking the blood pressure of a patient. To account for this, the average of the three readings was taken, instead of just the highest or lowest values. There are two types of blood pressure, systolic and diastolic. To account for this, both blood pressure level were added together to create a blood pressure score. 
+```{r, include=FALSE}
+exam_data <- mutate(exam_data, avg_dia = (BPXDI1 + BPXDI2 + BPXDI3)/3)
+exam_data <- mutate(exam_data, avg_sys = (BPXSY1 + BPXSY2 + BPXSY3)/3)
+exam_data <- mutate(exam_data, avg_BP = avg_dia + avg_sys)
+needed_exam_data <- select(exam_data, c(SEQN, avg_BP, avg_dia, BMXBMI))
+```
+From the demographics data set, which collects basic information from the respondent, the age of the respondent was recorded as well as the number of people living in the respondent's household was recorded which is used later in another data manipulation. 
+```{r, include = FALSE}
+needed_demo_data <- select(demo_data, c(SEQN, RIDAGEYR, DMDHHSIZ))
+```
+Finally, all the data was merged together by 'SEQN', as mentioned previously. One last data point that was changed was avg_GB which corresponds to the total amount of money that a household spent on groceries divided by the amount of people in the household. This was done because one of the insights that is being looked at is the impact of going to the grocery store instead of eating out. Some respondents live in larger homes and therefore have larger values of purchases at grocery stores. By preforming this operation, we get this number in per/person terms. Another modification that was made to the data entails changing the initial value of the data point by subtracting 1. This is done because in the survey, respondents who answered 'yes' received a 1 and those who answered 'no' received a 2. To ensure the interpretability of the data, 1 was subtracted to make this question a true categorical variable taking on a value of either 0 or 1. All of the data in the sample was then normalized, meaning it has a mean of 0 and a standard deviation of 1. This was done to examine the effect of each of the regressors and their significance. Although interpretability was lost in this process, the true overall impact of each of the regressors chose on blood pressure can be better understood.  A sample of the completed data set is shown below.
+```{r, include=FALSE}
+full <- merge(needed_demo_data, needed_exam_data, by = 'SEQN', all = TRUE)
+full_data <- full <- merge(full, needed_question_data, by = 'SEQN', all = TRUE)
+full_data <- mutate(full_data, avg_GB = CBD070 / DMDHHSIZ)
+#summary(full_data)
+full_data$HIQ210 <- full_data$HIQ210 - 1
+#full_data$ALQ160 <- full_data$ALQ160 - 1
+full_data$FSD061 <- full_data$FSD061 - 1
+
+```
+
+
+```{r, echo=FALSE}
+#sort(filter(full_data, RIDAGEYR >= 18)$SUMDPQ, decreasing = TRUE)
+smaller_data <- filter(full_data, RIDAGEYR > 17, SXQ610 < 7, HIQ210 < 3, PAD675 < 600, DUQ230 < 30, avg_GB < 20000, DBD895 < 35, IND235 <13, avg_BP > 175)
+#summary(smaller_data[complete.cases(smaller_data),])
+useful_data <- smaller_data[complete.cases(smaller_data),]
+scaled_useful_data <- data.frame(scale(useful_data))
+#filtering to get rid of Don't Knows and Will not responds          , ALQ160 < 8, FSD061 < 3
+head(filter(scaled_useful_data), 5)
+```
+# Analysis 
+
+### Model
+We aim to specify the model that satisfies the assumptions of linear regression. We want to show that the relationship between blood pressure and our regressors is linear, that the error of predicted values follows a normal distribution with mean zero, that covariance between regressors is 0. The following tests will show that these assumptions are met and also will assist in determining what factors are actually included in the model. 
+The analysis begins by determining what regressors will be used. To determine the best possible model, we first fit a regression on all of the regressors and use the ols_step_all_possible() function from the olsrr package. This function computes every possible combination of the regressors given, and shows error scores for each one. From this, the best model can be determined. From the results below, we can see that the best model that balances both having the highest r squared value as well as having a low Mallow's CP error can be seen. We will consider the model with 7 regressors. 
+```{r, include=FALSE}
+#model before being scaled 
+library('olsrr')
+lm_full <- lm(avg_BP  ~ BMXBMI + SUMDPQ + SXQ610 + HIQ210 + PAD675 + IND235 + RIDAGEYR+ DBD895 + DUQ230 + ALQ160 + FSD061 + avg_GB, data = useful_data)
+
+#finding the model before scaling
+#olsrr_all <- olsrr::ols_step_all_possible(lm_full)
+
+#sort(olsrr_all$cp, decreasing = FALSE)
+#model before scaling returns same model
+#olsrr_all[which(olsrr_all$cp<10 & olsrr_all$rsquare > .09), ]
+```
+
+```{r, echo=FALSE}
+#specifying full model with scaled regressors 
+scaled_lm_full <- lm(avg_BP  ~ BMXBMI + SUMDPQ + SXQ610 + HIQ210 + PAD675 + IND235 + RIDAGEYR+ DBD895 + DUQ230 + ALQ160 + FSD061 + avg_GB, data = useful_data)
+#function to find best possible regression 
+olsrr_all <- olsrr::ols_step_all_possible(scaled_lm_full)
+
+#top 5 regression estimate rsquare values, quite low 
+#head(sort(olsrr_all$rsquare, decreasing = TRUE))
+
+#the best regression models by lowest errors 
+olsrr_all[which(olsrr_all$cp<6), ]
+```
+
+Here, we further examine the coefficients of the best possible model of the regressors. The regressors are defined as follows: (BMXBMI : BMI of patient, HIQ210 : Health Insurance, IND235 : Income Level, RIDAGEYR: Age of patient, DUQ230 : Diet Behavior, DUQ230 : Consumption of Marijuana in the last 30 days, ALQ160 : Consumption of Alcohol in the last 30 days)
+```{r, echo=FALSE}
+best_model <- lm(SUMDPQ ~ BMXBMI + HIQ210 + IND235 + RIDAGEYR +DUQ230 + ALQ160 + avg_GB, data = scaled_useful_data)
+summary(best_model)
+```
+
+### Model Analysis
+Model Adequacy Checking: Here, analyzing the QQ-plot of the student residuals it can be observed that something strange going on. The plot indicates that there is a right skew in the student residuals from our model. This is an issue that will be explained later.
+```{r, echo=FALSE}
+## R-student residuals
+library(MASS) # Modern Applied Statistics with S
+r_stud <- studres(best_model)
+
+plot.new()
+qqnorm(r_stud, pch = 16, main = "QQ-plot of R-student residuals")
+qqline(r_stud, col = "steelblue", lwd = 3)
+
+```
+
+Residual Diagnostics: Similarly, when looking at the plot of residuals, no pattern should be observed. However, there does appear to be a pattern in this plot. This pattern seems to prevent the residuals from dropping below a certain threshold as the fitted y values increase. Again, this will be discussed further in the results section.
+```{r, echo=FALSE}
+plot.new()
+plot(x = best_model$fitted.values, y = r_stud, 
+     #xlim = c(0, 80), 
+     #ylim = c(-2.5, 5),
+     xlab = "fitted y", ylab = "R-student", 
+     main = "residual vs. fitted")
+abline(h = 0, col = "red", lwd = 2)
+```
+
+Leverage and Influence Diagnostics: This section will look at two different ways of finding leverage and influence points that may have a very significant effect on each of the regressors. First, the dfbetas function measures how much each regression coefficient changes in standard deviation units if the that observation is removed. It can be seen which points change the regression estimates the most below. 
+```{r, echo=FALSE}
+## R-student residuals
+head(sort(r_stud, decreasing = TRUE))
+dfbeta <- data.frame(dfbetas(best_model))
+dfbeta <- mutate(dfbeta, sum_resid =abs(BMXBMI) +abs(HIQ210) +abs(IND235) +abs(RIDAGEYR) +abs(DUQ230) +abs(ALQ160) +abs(avg_GB))
+#sort(dfbeta$sum_resid, decreasing = TRUE)
+dfbeta[which(dfbeta$sum_resid>.6), ]
+```
+This next test looks at the points that change the predicted value the most. It does this by looking at the change of the predicted value in standard deviation units. The points that cause the biggest change are shown below. 
+```{r, echo=FALSE}
+dffit <- dffits(best_model)
+(head(sort(dffit, decreasing = TRUE)))
+```
+Even though these points are influential, they should not be discarded because they are in fact real points.
+
+Multicolinearity Diagnostics - the vif() function calculates the Variance Inflation Factors. In other words, it measures the combined effect of the dependencies among the regressors on the variance of an individual regressor. It can be seen that there is little-to-no multicolinearity because of the low VIF values.
+```{r, echo=FALSE}
+(vif_all <- car::vif(best_model))
+```
+
+### Model Results 
+As the summary of the figures show, only the BMI, Income, Age, and Marijuana consumption were statistically significant. From these results, our model tells us that having a higher BMI typically correlates to having higher blood pressure, which aligns with common knowledge of BMI and how it is calculated. Also, the regressor on income is very intriguing to observe as it serves to show, as you move up each income bracket, you are predicted to have lower blood pressure by this model. Finally, we see that the impact of consuming marijuana actually increases the predicted blood pressure. Perhaps more study on this is needed because marijuana is believed to lower stress levels which is correlated with blood pressure. 
+From the analysis of the different tests listed above, we could see that the regressors are not correlated to one another which means that the model does not contain multicolinearity. However, the model struggles in other areas such as the QQ-plot and the plot of the residuals. The QQ-plot indicates a right skew of the residuals and that can similarly be seen in the residual plot because of its linear pattern when the predicted blood pressure values are below 0.5. This is likely because when the data was normalized, the data towards the center of each distribution would have a lower residual than otherwise. It is the outlier points that cause quite high residuals and for each of the regressors, some responses result in very high values. 
+
+# Conclusion 
+In conclusion, this paper looked at when patients have high blood pressure, what factors may have caused that high blood pressure? There are just about an infinite amount of things that may go into an individual's reading that day, but a few of the external patterns were examined here. It can be concluded that age, income, and BMI do have an impact on blood pressure. This result is not very actionable, but may encourage people to not always pick the cheapest option when choosing their meals to ensure some sort of quality of nutrients, and also to exersize regularly to avoid having an overly high BMI.
+
+There were many factors that could be changed to improve this analysis. For one, the cleanliness of data used was poor. The survey data doesn't function well in the way that some responses with higher values aren't recorded in the same manner as others. This leads to an inability to interpret results. Similarly, there were many NA values within the original data of about 10,000 respondents. Once the data was cleaned and processed, it only had about 4,000. This is often because when a question does not apply or the patient doesn't have to answer, it is left as an NA value. Correlations could be drawn to examine what groups of people leave NA values, because lots of information was lost. Lastly, something that could be done is to separate the numerical and categorical variables in order to keep interpretability in tact. By not having to normalize the data, perhaps more insights could have been drawn. 
+
+# Sources
+
+Data - Centers for Disease Control and Prevention. “National Health and Nutrition Examination Survey.” Kaggle, 26 Jan. 2017, https://www.kaggle.com/CDC/national-health-and-nutrition-examination-survey?select=examination.csv. 
+
+[1] “Products - Data Briefs - Number 364 - April 2020.” Centers for Disease Control and Prevention, Centers for Disease Control and Prevention, 24 Apr. 2020, https://www.cdc.gov/nchs/products/databriefs/db364.htm. 
+
+[2] “Standard American Diet.” NutritionFacts.org, https://nutritionfacts.org/topics/standard-american-diet/. 
+
